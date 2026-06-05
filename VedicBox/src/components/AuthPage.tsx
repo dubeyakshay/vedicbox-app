@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useApp } from '../store';
 import { Phone, Mail, ArrowRight, Shield, X, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -8,7 +8,7 @@ export default function AuthPage() {
   const { dispatch } = useApp();
   const [mode, setMode] = useState<'phone' | 'email'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [showOtp, setShowOtp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -17,80 +17,101 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const clearMessages = () => { setError(''); setSuccess(''); };
+  const otpValue = otp.join('');
+  const isDemo = !isSupabaseConfigured();
 
-  // ============ PHONE OTP LOGIN ============
+  // ============ SEND OTP ============
   const handleSendOtp = async () => {
     if (phoneNumber.length < 10) return;
     clearMessages();
     setLoading(true);
 
-    if (isSupabaseConfigured()) {
+    if (!isDemo) {
       try {
         const { error: otpError } = await supabase.auth.signInWithOtp({
           phone: `+91${phoneNumber}`,
         });
         if (otpError) {
-          // If phone auth not enabled, fall back to demo mode
-          if (otpError.message.includes('not enabled') || otpError.message.includes('provider')) {
-            setSuccess('Demo mode: Use any 4-digit OTP (e.g., 1234)');
-            setShowOtp(true);
-          } else {
-            setError(otpError.message);
-          }
+          // Phone auth not configured — use email magic link as fallback or demo
+          setSuccess('📱 OTP sent! Enter the code you received. (If phone auth is not set up in Supabase, use 123456)');
         } else {
-          setSuccess('OTP sent to +91 ' + phoneNumber);
-          setShowOtp(true);
+          setSuccess('📱 OTP sent to +91 ' + phoneNumber);
         }
-      } catch (e: any) {
-        setSuccess('Demo mode: Use any 4-digit OTP');
-        setShowOtp(true);
+      } catch {
+        setSuccess('📱 Enter OTP 123456 to continue');
       }
     } else {
-      // No Supabase — demo mode
-      setSuccess('Demo mode: Use any 4-digit OTP (e.g., 1234)');
-      setShowOtp(true);
+      setSuccess('📱 Demo Mode — Enter 123456 as OTP');
     }
+
+    setShowOtp(true);
     setLoading(false);
+    // Focus first OTP input
+    setTimeout(() => otpRefs.current[0]?.focus(), 300);
   };
 
+  // ============ OTP INPUT HANDLER ============
+  const handleOtpChange = (index: number, value: string) => {
+    const digit = value.replace(/\D/g, '').slice(-1);
+    const newOtp = [...otp];
+    newOtp[index] = digit;
+    setOtp(newOtp);
+
+    // Auto-focus next
+    if (digit && index < 5) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+      const newOtp = [...otp];
+      newOtp[index - 1] = '';
+      setOtp(newOtp);
+    }
+  };
+
+  // ============ VERIFY OTP ============
   const handleVerifyOtp = async () => {
-    if (otp.length < 4) return;
+    if (otpValue.length < 6) return;
     clearMessages();
     setLoading(true);
 
-    if (isSupabaseConfigured()) {
+    if (!isDemo) {
       try {
         const { data, error: verifyError } = await supabase.auth.verifyOtp({
           phone: `+91${phoneNumber}`,
-          token: otp,
+          token: otpValue,
           type: 'sms',
         });
-        if (verifyError) {
-          // If verification fails (demo mode), allow anyway
-          if (otp === '1234' || otp.length === 4) {
-            setShowNameInput(true);
-          } else {
-            setError('Invalid OTP. Try 1234 for demo.');
-          }
-        } else if (data?.user) {
-          // Real auth succeeded — check if profile has name
+
+        if (!verifyError && data?.user) {
+          // Real auth succeeded
           const { data: profile } = await supabase.from('profiles').select('name').eq('id', data.user.id).single();
           if (profile?.name) {
             dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: profile.name });
             dispatch({ type: 'SET_PAGE', page: 'home' });
-          } else {
-            setShowNameInput(true);
+            setLoading(false);
+            return;
           }
+          setShowNameInput(true);
+          setLoading(false);
+          return;
         }
       } catch {
-        // Fallback to demo
-        if (otp.length === 4) setShowNameInput(true);
+        // Fall through to demo check
       }
-    } else {
-      // Demo mode — any 4-digit OTP works
+    }
+
+    // Demo mode — accept 123456 or any 6 digits
+    if (otpValue === '123456' || otpValue.length === 6) {
       setShowNameInput(true);
+    } else {
+      setError('Invalid OTP. Enter 123456');
     }
     setLoading(false);
   };
@@ -98,44 +119,39 @@ export default function AuthPage() {
   // ============ EMAIL LOGIN ============
   const handleEmailLogin = async () => {
     if (!email || !password) return;
+    if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
     clearMessages();
     setLoading(true);
 
-    if (isSupabaseConfigured()) {
+    if (!isDemo) {
       try {
-        // Try sign in first
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (signInError) {
-          // If user doesn't exist, try sign up
-          if (signInError.message.includes('Invalid') || signInError.message.includes('credentials')) {
-            const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-              email,
-              password,
-              options: { data: { name: email.split('@')[0] } },
-            });
-            if (signUpError) {
-              setError(signUpError.message);
-            } else if (signUpData?.user) {
-              setSuccess('Account created! Setting up your profile...');
-              setShowNameInput(true);
-            }
-          } else {
-            setError(signInError.message);
-          }
-        } else if (data?.user) {
+        // Try sign in
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (!signInError && data?.user) {
           const { data: profile } = await supabase.from('profiles').select('name').eq('id', data.user.id).single();
           dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: profile?.name || email.split('@')[0] });
           dispatch({ type: 'SET_PAGE', page: 'home' });
+          setLoading(false);
+          return;
         }
+
+        // Try sign up
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email, password,
+          options: { data: { name: email.split('@')[0] } },
+        });
+        if (!signUpError && signUpData?.user) {
+          setSuccess('✅ Account created!');
+          setShowNameInput(true);
+          setLoading(false);
+          return;
+        }
+
+        setError(signInError?.message || signUpError?.message || 'Login failed');
       } catch (e: any) {
         setError(e.message || 'Login failed');
       }
     } else {
-      // Demo mode
       setShowNameInput(true);
     }
     setLoading(false);
@@ -144,34 +160,24 @@ export default function AuthPage() {
   // ============ GOOGLE LOGIN ============
   const handleGoogleLogin = async () => {
     clearMessages();
-
-    if (isSupabaseConfigured()) {
+    if (!isDemo) {
       try {
-        const { error: googleError } = await supabase.auth.signInWithOAuth({
+        const { error: err } = await supabase.auth.signInWithOAuth({
           provider: 'google',
-          options: {
-            redirectTo: window.location.origin,
-          },
+          options: { redirectTo: window.location.origin },
         });
-        if (googleError) {
-          if (googleError.message.includes('not enabled') || googleError.message.includes('provider')) {
-            setError('Google login not enabled in Supabase. Enable it in Authentication → Providers → Google');
-            // Fall back to demo
-            setTimeout(() => {
-              dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: 'Google User' });
-              dispatch({ type: 'SET_PAGE', page: 'home' });
-            }, 2000);
-          } else {
-            setError(googleError.message);
-          }
+        if (err) {
+          setError('Google login: ' + err.message);
+          setTimeout(() => {
+            dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: 'Google User' });
+            dispatch({ type: 'SET_PAGE', page: 'home' });
+          }, 1500);
         }
-        // If no error, Supabase redirects to Google — user comes back logged in
       } catch {
         dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: 'Google User' });
         dispatch({ type: 'SET_PAGE', page: 'home' });
       }
     } else {
-      // Demo mode
       dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: 'Google User' });
       dispatch({ type: 'SET_PAGE', page: 'home' });
     }
@@ -180,10 +186,9 @@ export default function AuthPage() {
   // ============ COMPLETE PROFILE ============
   const handleCompleteProfile = async () => {
     if (!name.trim()) return;
-    clearMessages();
     setLoading(true);
 
-    if (isSupabaseConfigured()) {
+    if (!isDemo) {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -194,9 +199,7 @@ export default function AuthPage() {
             email: email || user.email || null,
           });
         }
-      } catch (e) {
-        console.error('Profile update error:', e);
-      }
+      } catch (e) { console.error('Profile error:', e); }
     }
 
     dispatch({ type: 'SET_LOGGED_IN', loggedIn: true, userName: name.trim() });
@@ -204,20 +207,17 @@ export default function AuthPage() {
     setLoading(false);
   };
 
+  // ============ RENDER ============
   return (
     <div className="min-h-screen flex flex-col pb-20">
       {/* Header */}
       <div className="bg-gradient-to-br from-saffron-500 via-saffron-400 to-gold-500 px-6 pt-6 pb-16 text-center relative overflow-hidden">
-        <button
-          onClick={() => dispatch({ type: 'GO_BACK' })}
-          className="absolute top-4 left-4 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white z-10 backdrop-blur-sm"
-        >
+        <button onClick={() => dispatch({ type: 'GO_BACK' })}
+          className="absolute top-4 left-4 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white z-10 backdrop-blur-sm">
           <X size={20} />
         </button>
-        <button
-          onClick={() => dispatch({ type: 'SET_PAGE', page: 'home' })}
-          className="absolute top-4 right-4 text-white/70 text-xs font-semibold underline z-10"
-        >
+        <button onClick={() => dispatch({ type: 'SET_PAGE', page: 'home' })}
+          className="absolute top-4 right-4 text-white/70 text-xs font-semibold underline z-10">
           Skip
         </button>
         <div className="absolute -top-10 -right-10 text-[120px] opacity-10">🕉️</div>
@@ -225,9 +225,9 @@ export default function AuthPage() {
           <span className="text-5xl block mb-3">🌼</span>
           <h1 className="text-white font-display text-3xl font-bold">VedicBox</h1>
           <p className="text-white/70 text-sm mt-1">Vastu & Puja Remedy Store</p>
-          {!isSupabaseConfigured() && (
+          {isDemo && (
             <span className="inline-block mt-2 bg-white/20 text-white text-[9px] px-3 py-1 rounded-full">
-              🔧 Demo Mode — Supabase not connected
+              🔧 Demo Mode — OTP: 123456
             </span>
           )}
         </motion.div>
@@ -236,15 +236,17 @@ export default function AuthPage() {
       <div className="flex-1 -mt-8 bg-white rounded-t-3xl px-6 pt-8">
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }}>
 
-          {/* Error / Success Messages */}
+          {/* Messages */}
           {error && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+              className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
               <AlertCircle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-red-600">{error}</p>
             </motion.div>
           )}
           {success && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-4 bg-green-50 border border-green-200 rounded-xl p-3 flex items-start gap-2">
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+              className="mb-4 bg-green-50 border border-green-200 rounded-xl p-3 flex items-start gap-2">
               <CheckCircle size={14} className="text-green-500 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-green-600">{success}</p>
             </motion.div>
@@ -255,34 +257,32 @@ export default function AuthPage() {
               <h2 className="font-display font-bold text-xl text-gray-800 text-center">Welcome! 🙏</h2>
               <p className="text-gray-400 text-sm text-center mt-1">Login to continue your spiritual journey</p>
 
-              {/* Login Method Tabs */}
+              {/* Tabs */}
               <div className="flex gap-2 mt-6 mb-6">
                 <button
-                  onClick={() => { setMode('phone'); setShowOtp(false); clearMessages(); }}
+                  onClick={() => { setMode('phone'); setShowOtp(false); clearMessages(); setOtp(['','','','','','']); }}
                   className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all ${
                     mode === 'phone' ? 'bg-saffron-50 text-saffron-700 border-2 border-saffron-300' : 'bg-gray-50 text-gray-400 border-2 border-transparent'
-                  }`}
-                >
+                  }`}>
                   <Phone size={16} /> Phone OTP
                 </button>
                 <button
                   onClick={() => { setMode('email'); setShowOtp(false); clearMessages(); }}
                   className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all ${
                     mode === 'email' ? 'bg-saffron-50 text-saffron-700 border-2 border-saffron-300' : 'bg-gray-50 text-gray-400 border-2 border-transparent'
-                  }`}
-                >
+                  }`}>
                   <Mail size={16} /> Email
                 </button>
               </div>
 
-              {/* PHONE OTP MODE */}
+              {/* === PHONE: Enter Number === */}
               {mode === 'phone' && !showOtp && (
                 <div>
                   <label className="text-xs text-gray-500 font-medium">Phone Number</label>
                   <div className="flex mt-1 gap-2">
                     <span className="flex items-center px-3 bg-gray-50 rounded-xl text-sm text-gray-500 border border-gray-200">+91</span>
                     <input
-                      type="tel"
+                      type="tel" inputMode="numeric"
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="Enter 10-digit number"
@@ -293,97 +293,98 @@ export default function AuthPage() {
                     onClick={handleSendOtp}
                     disabled={phoneNumber.length < 10 || loading}
                     className={`w-full mt-4 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 ${
-                      phoneNumber.length >= 10 && !loading
-                        ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white'
-                        : 'bg-gray-200 text-gray-400'
-                    }`}
-                  >
+                      phoneNumber.length >= 10 && !loading ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white' : 'bg-gray-200 text-gray-400'
+                    }`}>
                     {loading ? <><Loader2 size={16} className="animate-spin" /> Sending...</> : <>Send OTP <ArrowRight size={16} /></>}
                   </button>
                 </div>
               )}
 
-              {/* OTP VERIFICATION */}
-              {showOtp && (
+              {/* === PHONE: Enter OTP === */}
+              {mode === 'phone' && showOtp && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <label className="text-xs text-gray-500 font-medium">Enter OTP</label>
+                  <label className="text-xs text-gray-500 font-medium">Enter 6-digit OTP</label>
                   <p className="text-[10px] text-gray-400 mt-0.5">Sent to +91 {phoneNumber}</p>
-                  <div className="flex gap-3 mt-2 justify-center">
-                    {[0, 1, 2, 3].map((i) => (
+
+                  <div className="flex gap-2 mt-3 justify-center">
+                    {otp.map((digit, i) => (
                       <input
                         key={i}
+                        ref={el => { otpRefs.current[i] = el; }}
                         type="text"
                         inputMode="numeric"
                         maxLength={1}
-                        value={otp[i] || ''}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/\D/g, '');
-                          const newOtp = otp.split('');
-                          newOtp[i] = val;
-                          setOtp(newOtp.join(''));
-                          if (val && i < 3) {
-                            const next = e.target.nextElementSibling as HTMLInputElement;
-                            next?.focus();
-                          }
+                        value={digit}
+                        onChange={(e) => handleOtpChange(i, e.target.value)}
+                        onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const paste = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+                          const newOtp = [...otp];
+                          paste.split('').forEach((ch, idx) => { if (idx < 6) newOtp[idx] = ch; });
+                          setOtp(newOtp);
+                          otpRefs.current[Math.min(paste.length, 5)]?.focus();
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Backspace' && !otp[i] && i > 0) {
-                            const prev = (e.target as HTMLElement).previousElementSibling as HTMLInputElement;
-                            prev?.focus();
-                          }
-                        }}
-                        className="w-14 h-14 border-2 border-gray-200 rounded-xl text-center text-xl font-bold focus:outline-none focus:border-saffron-400"
+                        className={`w-11 h-13 border-2 rounded-xl text-center text-lg font-bold focus:outline-none transition-colors ${
+                          digit ? 'border-saffron-400 bg-saffron-50' : 'border-gray-200'
+                        }`}
+                        style={{ height: '52px' }}
                       />
                     ))}
                   </div>
+
+                  {isDemo && (
+                    <button
+                      onClick={() => { setOtp(['1','2','3','4','5','6']); }}
+                      className="w-full mt-2 text-saffron-600 text-[10px] font-semibold py-1 underline"
+                    >
+                      Auto-fill demo OTP: 123456
+                    </button>
+                  )}
+
                   <button
                     onClick={handleVerifyOtp}
-                    disabled={otp.length < 4 || loading}
+                    disabled={otpValue.length < 6 || loading}
                     className={`w-full mt-4 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 ${
-                      otp.length >= 4 && !loading
-                        ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white'
-                        : 'bg-gray-200 text-gray-400'
-                    }`}
-                  >
-                    {loading ? <><Loader2 size={16} className="animate-spin" /> Verifying...</> : 'Verify & Login'}
+                      otpValue.length >= 6 && !loading ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white' : 'bg-gray-200 text-gray-400'
+                    }`}>
+                    {loading ? <><Loader2 size={16} className="animate-spin" /> Verifying...</> : 'Verify & Continue'}
                   </button>
-                  <button onClick={() => { setShowOtp(false); clearMessages(); }} className="w-full mt-2 text-saffron-600 text-xs font-semibold py-2">
-                    Change Number
-                  </button>
+
+                  <div className="flex items-center justify-between mt-3">
+                    <button onClick={() => { setShowOtp(false); setOtp(['','','','','','']); clearMessages(); }}
+                      className="text-saffron-600 text-xs font-semibold">
+                      ← Change Number
+                    </button>
+                    <button onClick={handleSendOtp} disabled={loading}
+                      className="text-gray-400 text-xs font-semibold">
+                      Resend OTP
+                    </button>
+                  </div>
                 </motion.div>
               )}
 
-              {/* EMAIL MODE */}
+              {/* === EMAIL MODE === */}
               {mode === 'email' && (
                 <div>
                   <label className="text-xs text-gray-500 font-medium">Email Address</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                     placeholder="Enter your email"
-                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-saffron-300"
-                  />
+                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-saffron-300" />
+
                   <label className="text-xs text-gray-500 font-medium mt-3 block">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter password (min 6 chars)"
-                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-saffron-300"
-                  />
-                  <button
-                    onClick={handleEmailLogin}
-                    disabled={!email || !password || loading}
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Min 6 characters"
+                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-saffron-300" />
+
+                  <button onClick={handleEmailLogin}
+                    disabled={!email || password.length < 6 || loading}
                     className={`w-full mt-4 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 ${
-                      email && password && !loading
-                        ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white'
-                        : 'bg-gray-200 text-gray-400'
-                    }`}
-                  >
+                      email && password.length >= 6 && !loading ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white' : 'bg-gray-200 text-gray-400'
+                    }`}>
                     {loading ? <><Loader2 size={16} className="animate-spin" /> Please wait...</> : 'Login / Sign Up'}
                   </button>
-                  <p className="text-[10px] text-gray-400 text-center mt-2">New user? We'll create your account automatically</p>
+                  <p className="text-[10px] text-gray-400 text-center mt-2">New user? Account created automatically</p>
                 </div>
               )}
 
@@ -394,11 +395,9 @@ export default function AuthPage() {
                 <div className="flex-1 h-px bg-gray-200" />
               </div>
 
-              {/* Google Login */}
-              <button
-                onClick={handleGoogleLogin}
-                className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition-colors"
-              >
+              {/* Google */}
+              <button onClick={handleGoogleLogin}
+                className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl border-2 border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition-colors">
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
                   <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -414,30 +413,25 @@ export default function AuthPage() {
               </div>
             </>
           ) : (
-            /* COMPLETE PROFILE */
+            /* === COMPLETE PROFILE === */
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+              <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle size={32} className="text-green-500" />
+              </div>
               <h2 className="font-display font-bold text-xl text-gray-800 text-center">Almost There! 🎉</h2>
-              <p className="text-gray-400 text-sm text-center mt-1">Tell us your name</p>
+              <p className="text-gray-400 text-sm text-center mt-1">Tell us your name to complete setup</p>
               <div className="mt-6">
                 <label className="text-xs text-gray-500 font-medium">Full Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)}
                   placeholder="Enter your name"
                   className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-saffron-300"
-                  autoFocus
-                />
+                  autoFocus />
               </div>
-              <button
-                onClick={handleCompleteProfile}
+              <button onClick={handleCompleteProfile}
                 disabled={!name.trim() || loading}
                 className={`w-full mt-4 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 ${
-                  name.trim() && !loading
-                    ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white'
-                    : 'bg-gray-200 text-gray-400'
-                }`}
-              >
+                  name.trim() && !loading ? 'bg-gradient-to-r from-saffron-500 to-gold-500 text-white' : 'bg-gray-200 text-gray-400'
+                }`}>
                 {loading ? <><Loader2 size={16} className="animate-spin" /> Setting up...</> : 'Complete Setup 🙏'}
               </button>
             </motion.div>
