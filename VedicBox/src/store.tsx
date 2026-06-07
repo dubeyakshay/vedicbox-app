@@ -103,10 +103,9 @@ function reducer(state: AppState, action: Action): AppState {
     case 'CLEAR_CART':
       return { ...state, cart: [], couponApplied: false, couponCode: '', couponDiscount: 0 };
     case 'SET_PAGE': {
-      // Don't push duplicate consecutive pages
       const newHistory = action.page === state.currentPage
         ? state.pageHistory
-        : [...state.pageHistory, state.currentPage].slice(-10); // keep last 10
+        : [...state.pageHistory, state.currentPage].slice(-10);
       return {
         ...state,
         currentPage: action.page,
@@ -146,7 +145,6 @@ function reducer(state: AppState, action: Action): AppState {
       const newWishlist = exists
         ? state.wishlist.filter(id => id !== action.productId)
         : [...state.wishlist, action.productId];
-      // Sync to Supabase in background
       updateWishlist(newWishlist).catch(() => {});
       return { ...state, wishlist: newWishlist };
     }
