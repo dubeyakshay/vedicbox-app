@@ -30,7 +30,6 @@ export default function CheckoutPage() {
     setPlacingOrder(true);
     const orderId = 'VB' + Date.now().toString().slice(-8);
 
-    // Save to Supabase if configured
     if (isSupabaseConfigured()) {
       try {
         await createOrder({
@@ -54,7 +53,6 @@ export default function CheckoutPage() {
       }
     }
 
-    // Always save to local state too
     dispatch({
       type: 'ADD_ORDER',
       order: {
@@ -114,7 +112,6 @@ export default function CheckoutPage() {
 
   return (
     <div className="pb-32">
-      {/* Progress Steps */}
       <div className="px-4 py-4">
         <div className="flex items-center justify-center gap-2">
           {[1, 2, 3].map((s) => (
@@ -133,7 +130,6 @@ export default function CheckoutPage() {
         </div>
       </div>
 
-      {/* Step 1: Address */}
       {step === 1 && (
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="px-4">
           <h3 className="font-display font-bold text-lg text-gray-800 mb-4">Delivery Address</h3>
@@ -159,7 +155,6 @@ export default function CheckoutPage() {
         </motion.div>
       )}
 
-      {/* Step 2: Payment */}
       {step === 2 && (
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="px-4">
           <h3 className="font-display font-bold text-lg text-gray-800 mb-4">Payment Method</h3>
@@ -220,12 +215,10 @@ export default function CheckoutPage() {
         </motion.div>
       )}
 
-      {/* Step 3: Review */}
       {step === 3 && (
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="px-4">
           <h3 className="font-display font-bold text-lg text-gray-800 mb-4">Review & Confirm</h3>
           
-          {/* Address Summary */}
           <div className="bg-white rounded-xl p-4 border border-gray-100 mb-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-gray-500 uppercase">Delivery To</span>
@@ -236,7 +229,6 @@ export default function CheckoutPage() {
             <p className="text-xs text-gray-500">{address.city}, {address.state} - {address.pincode}</p>
           </div>
 
-          {/* Items Summary */}
           <div className="bg-white rounded-xl p-4 border border-gray-100 mb-3">
             <span className="text-xs font-semibold text-gray-500 uppercase">Items ({state.cart.length})</span>
             <div className="mt-2 space-y-2">
@@ -253,7 +245,6 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* Payment Summary */}
           <div className="bg-white rounded-xl p-4 border border-gray-100 mb-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-gray-500 uppercase">Payment</span>
@@ -264,7 +255,6 @@ export default function CheckoutPage() {
             </p>
           </div>
 
-          {/* Total */}
           <div className="bg-saffron-50 rounded-xl p-4 border border-saffron-200/50">
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
