@@ -8,14 +8,13 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const isSingleFile = process.env.VITE_SINGLE_FILE !== "false";
+const isVercelBuild = process.env.VERCEL === "1";
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    ...(isSingleFile ? [viteSingleFile()] : []),
+    ...(!isVercelBuild ? [viteSingleFile()] : []),
   ],
   resolve: {
     alias: {
