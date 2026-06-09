@@ -11,6 +11,7 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('upi');
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [dbStatus, setDbStatus] = useState<string>('');
   const [address, setAddress] = useState({
     name: state.userName || 'Rajesh Kumar',
     phone: '9876543210',
@@ -30,29 +31,35 @@ export default function CheckoutPage() {
     setPlacingOrder(true);
     const orderId = 'VB' + Date.now().toString().slice(-8);
 
+    // Save to Supabase if configured
     if (isSupabaseConfigured()) {
-      try {
-        await createOrder({
-          items: state.cart.map(item => ({
-            productId: item.product.id,
-            productName: item.product.name,
-            quantity: item.quantity,
-            price: item.product.price,
-            image: item.product.image,
-          })),
-          subtotal,
-          couponCode: state.couponApplied ? state.couponCode : undefined,
-          couponDiscount: couponSavings,
-          shippingCharge: shipping,
-          totalAmount: total,
-          paymentMethod,
-          shippingAddress: address,
-        });
-      } catch (e) {
-        console.error('Supabase order error:', e);
+      const result = await createOrder({
+        items: state.cart.map(item => ({
+          productId: item.product.id,
+          productName: item.product.name,
+          quantity: item.quantity,
+          price: item.product.price,
+          image: item.product.image,
+        })),
+        subtotal,
+        couponCode: state.couponApplied ? state.couponCode : undefined,
+        couponDiscount: couponSavings,
+        shippingCharge: shipping,
+        totalAmount: total,
+        paymentMethod,
+        shippingAddress: address,
+      });
+      if (result.success) {
+        setDbStatus('✅ Saved to database');
+      } else {
+        setDbStatus('⚠️ ' + (result.error || 'DB save failed'));
+        console.error('Order DB error:', result.error);
       }
+    } else {
+      setDbStatus('ℹ️ Supabase not configured — saved locally only');
     }
 
+    // Always save to local state too
     dispatch({
       type: 'ADD_ORDER',
       order: {
@@ -82,8 +89,10 @@ export default function CheckoutPage() {
           </div>
           <h2 className="font-display font-bold text-2xl text-gray-800">Order Placed! 🎉</h2>
           <p className="text-gray-500 text-sm mt-2">Your sacred items are being prepared with love and devotion</p>
-          {isSupabaseConfigured() && (
-            <p className="text-green-600 text-xs mt-1 font-semibold">✅ Saved to database</p>
+          {dbStatus && (
+            <p className={`text-xs mt-1 font-semibold ${dbStatus.includes('✅') ? 'text-green-600' : dbStatus.includes('⚠️') ? 'text-amber-600' : 'text-gray-400'}`}>
+              {dbStatus}
+            </p>
           )}
           <div className="bg-saffron-50 rounded-2xl p-4 mt-6">
             <p className="text-xs text-gray-500">Order ID</p>
