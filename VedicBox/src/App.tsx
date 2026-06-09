@@ -1,5 +1,6 @@
 import { AppProvider, useApp } from './store';
 import { ToastProvider } from './components/Toast';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 import HomePage from './components/HomePage';
@@ -19,6 +20,7 @@ import AssistantBot from './components/AssistantBot';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { logError } from './utils/errorHandler';
 
 function AppContent() {
   const { state, dispatch } = useApp();
@@ -27,23 +29,35 @@ function AppContent() {
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
 
-    // Check existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        supabase.from('profiles').select('name').eq('id', session.user.id).single().then(({ data }) => {
-          dispatch({
-            type: 'SET_LOGGED_IN',
-            loggedIn: true,
-            userName: data?.name || session.user.email?.split('@')[0] || 'User',
-          });
-        });
+    const initAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (session?.user) {
+          try {
+            const { data } = await supabase.from('profiles').select('name').eq('id', session.user.id).single();
+            dispatch({
+              type: 'SET_LOGGED_IN',
+              loggedIn: true,
+              userName: data?.name || session.user.email?.split('@')[0] || 'User',
+            });
+          } catch (e) {
+            logError(e, 'Profile fetch');
+          }
+        }
+      } catch (error) {
+        logError(error, 'Session check');
       }
-    });
+    };
+
+    initAuth();
 
     // Listen for auth changes (login/logout/Google redirect)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        supabase.from('profiles').select('name').eq('id', session.user.id).single().then(({ data }) => {
+        try {
+          const { data } = await supabase.from('profiles').select('name').eq('id', session.user.id).single();
           dispatch({
             type: 'SET_LOGGED_IN',
             loggedIn: true,
@@ -52,7 +66,9 @@ function AppContent() {
           if (state.currentPage === 'auth') {
             dispatch({ type: 'SET_PAGE', page: 'home' });
           }
-        });
+        } catch (error) {
+          logError(error, 'Auth state change');
+        }
       } else {
         dispatch({ type: 'SET_LOGGED_IN', loggedIn: false });
       }
@@ -108,10 +124,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <ToastProvider>
+          <AppContent />
+        </ToastProvider>
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
