@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { validateEmail, validatePhone, validateZipCode, sanitizeInput, validateAmount, validateCouponCode } from '../utils/validation';
+import { sanitizeInput, validateAmount, validateCouponCode } from '../utils/validation';
 import { logError } from '../utils/errorHandler';
 
 // Helper: get current user ID reliably
